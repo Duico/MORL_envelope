@@ -1,0 +1,3 @@
+[submodule "synthetic/envs/idm_bo_morl"]
+	path = synthetic/envs/idm_bo_morl
+	url = git@github.com:adondera/idm-bo-morl.git

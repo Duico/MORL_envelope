@@ -17,7 +17,7 @@ Tensor = FloatTensor
 
 
 class MetaAgent(object):
-    '''
+    """
     (1) act: how to sample an action to examine the learning
         outcomes or explore the environment;
     (2) memorize: how to store observed observations in order to
@@ -26,7 +26,7 @@ class MetaAgent(object):
     (3) learn: how the agent learns from the observations via
         explicitor implicit inference, how to optimize the policy
         model.
-    '''
+    """
 
     def __init__(self, model, args, is_train=False):
         self.model_ = model
@@ -41,21 +41,23 @@ class MetaAgent(object):
         self.batch_size = args.batch_size
         self.weight_num = args.weight_num
 
-        self.beta            = args.beta
-        self.beta_init       = args.beta
-        self.homotopy        = args.homotopy
-        self.beta_uplim      = 1.00
-        self.tau             = 1000.
-        self.beta_expbase    = float(np.power(self.tau*(self.beta_uplim-self.beta), 1./args.episode_num))
-        self.beta_delta      = self.beta_expbase / self.tau
+        self.beta = args.beta
+        self.beta_init = args.beta
+        self.homotopy = args.homotopy
+        self.beta_uplim = 1.00
+        self.tau = 1000.0
+        self.beta_expbase = float(
+            np.power(self.tau * (self.beta_uplim - self.beta), 1.0 / args.episode_num)
+        )
+        self.beta_delta = self.beta_expbase / self.tau
 
         self.trans_mem = deque()
-        self.trans = namedtuple('trans', ['s', 'a', 's_', 'r', 'd'])
+        self.trans = namedtuple("trans", ["s", "a", "s_", "r", "d"])
         self.priority_mem = deque()
 
-        if args.optimizer == 'Adam':
+        if args.optimizer == "Adam":
             self.optimizer = optim.Adam(self.model_.parameters(), lr=args.lr)
-        elif args.optimizer == 'RMSprop':
+        elif args.optimizer == "RMSprop":
             self.optimizer = optim.RMSprop(self.model_.parameters(), lr=args.lr)
 
         self.w_kept = None
@@ -73,14 +75,15 @@ class MetaAgent(object):
         if preference is None:
             if self.w_kept is None:
                 self.w_kept = torch.randn(self.model_.reward_size)
-                self.w_kept = (torch.abs(self.w_kept) / \
-                               torch.norm(self.w_kept, p=1)).type(FloatTensor)
+                self.w_kept = (
+                    torch.abs(self.w_kept) / torch.norm(self.w_kept, p=1)
+                ).type(FloatTensor)
             preference = self.w_kept
         state = torch.from_numpy(state).type(FloatTensor)
 
         _, Q = self.model_(
-            Variable(state.unsqueeze(0)),
-            Variable(preference.unsqueeze(0)))
+            Variable(state.unsqueeze(0)), Variable(preference.unsqueeze(0))
+        )
 
         Q = Q.view(-1, self.model_.reward_size)
 
@@ -89,29 +92,37 @@ class MetaAgent(object):
         action = Q.max(0)[1].cpu().numpy()
         action = int(action)
 
-        if self.is_train and (len(self.trans_mem) < self.batch_size or \
-                              torch.rand(1)[0] < self.epsilon):
+        if self.is_train and (
+            len(self.trans_mem) < self.batch_size or torch.rand(1)[0] < self.epsilon
+        ):
             action = np.random.choice(self.model_.action_size, 1)[0]
             action = int(action)
 
         return action
 
     def memorize(self, state, action, next_state, reward, terminal):
-        self.trans_mem.append(self.trans(
-            torch.from_numpy(state).type(FloatTensor),  # state
-            action,  # action
-            torch.from_numpy(next_state).type(FloatTensor),  # next state
-            torch.from_numpy(reward).type(FloatTensor),  # reward
-            terminal))  # terminal
+        self.trans_mem.append(
+            self.trans(
+                torch.from_numpy(state).type(FloatTensor),  # state
+                action,  # action
+                torch.from_numpy(next_state).type(FloatTensor),  # next state
+                torch.from_numpy(reward).type(FloatTensor),  # reward
+                terminal,
+            )
+        )  # terminal
 
         # randomly produce a preference for calculating priority
         # preference = self.w_kept
         preference = torch.randn(self.model_.reward_size)
-        preference = (torch.abs(preference) / torch.norm(preference, p=1)).type(FloatTensor)
+        preference = (torch.abs(preference) / torch.norm(preference, p=1)).type(
+            FloatTensor
+        )
         state = torch.from_numpy(state).type(FloatTensor)
 
-        _, q = self.model_(Variable(state.unsqueeze(0), requires_grad=False),
-                           Variable(preference.unsqueeze(0), requires_grad=False))
+        _, q = self.model_(
+            Variable(state.unsqueeze(0), requires_grad=False),
+            Variable(preference.unsqueeze(0), requires_grad=False),
+        )
 
         q = q[0, action].data
         wq = preference.dot(q)
@@ -119,8 +130,10 @@ class MetaAgent(object):
         wr = preference.dot(torch.from_numpy(reward).type(FloatTensor))
         if not terminal:
             next_state = torch.from_numpy(next_state).type(FloatTensor)
-            hq, _ = self.model_(Variable(next_state.unsqueeze(0), requires_grad=False),
-                                Variable(preference.unsqueeze(0), requires_grad=False))
+            hq, _ = self.model_(
+                Variable(next_state.unsqueeze(0), requires_grad=False),
+                Variable(preference.unsqueeze(0), requires_grad=False),
+            )
             hq = hq.data[0]
             whq = preference.dot(hq)
             p = abs(wr + self.gamma * whq - wq)
@@ -131,24 +144,22 @@ class MetaAgent(object):
                 self.epsilon -= self.epsilon_delta
             if self.homotopy:
                 self.beta += self.beta_delta
-                self.beta_delta = (self.beta-self.beta_init)*self.beta_expbase+self.beta_init-self.beta
+                self.beta_delta = (
+                    (self.beta - self.beta_init) * self.beta_expbase
+                    + self.beta_init
+                    - self.beta
+                )
             p = abs(wr - wq)
         p += 1e-5
 
-        self.priority_mem.append(
-            p
-        )
+        self.priority_mem.append(p)
         if len(self.trans_mem) > self.mem_size:
             self.trans_mem.popleft()
             self.priority_mem.popleft()
 
     def sample(self, pop, pri, k):
         pri = np.array(pri).astype(np.float)
-        inds = np.random.choice(
-            range(len(pop)), k,
-            replace=False,
-            p=pri / pri.sum()
-        )
+        inds = np.random.choice(range(len(pop)), k, replace=False, p=pri / pri.sum())
         return [pop[i] for i in inds]
 
     def actmsk(self, num_dim, index):
@@ -180,54 +191,75 @@ class MetaAgent(object):
             terminal_batch = batchify(map(lambda x: x.d, minibatch))
 
             w_batch = np.random.randn(self.weight_num, reward_size)
-            w_batch = np.abs(w_batch) / \
-                      np.linalg.norm(w_batch, ord=1, axis=1, keepdims=True)
-            w_batch = torch.from_numpy(w_batch.repeat(self.batch_size, axis=0)).type(FloatTensor)
+            w_batch = np.abs(w_batch) / np.linalg.norm(
+                w_batch, ord=1, axis=1, keepdims=True
+            )
+            w_batch = torch.from_numpy(w_batch.repeat(self.batch_size, axis=0)).type(
+                FloatTensor
+            )
 
-            __, Q = self.model_(Variable(torch.cat(state_batch, dim=0)),
-                                Variable(w_batch), w_num=self.weight_num)
+            __, Q = self.model_(
+                Variable(torch.cat(state_batch, dim=0)),
+                Variable(w_batch),
+                w_num=self.weight_num,
+            )
 
             # detach since we don't want gradients to propagate
             # HQ, _    = self.model_(Variable(torch.cat(next_state_batch, dim=0), volatile=True),
             # 					  Variable(w_batch, volatile=True), w_num=self.weight_num)
-            _, DQ = self.model(Variable(torch.cat(next_state_batch, dim=0), requires_grad=False),
-                               Variable(w_batch, requires_grad=False))
+            _, DQ = self.model(
+                Variable(torch.cat(next_state_batch, dim=0), requires_grad=False),
+                Variable(w_batch, requires_grad=False),
+            )
             w_ext = w_batch.unsqueeze(2).repeat(1, action_size, 1)
             w_ext = w_ext.view(-1, self.model.reward_size)
-            _, tmpQ = self.model_(Variable(torch.cat(next_state_batch, dim=0), requires_grad=False),
-                                  Variable(w_batch, requires_grad=False))
+            _, tmpQ = self.model_(
+                Variable(torch.cat(next_state_batch, dim=0), requires_grad=False),
+                Variable(w_batch, requires_grad=False),
+            )
 
             tmpQ = tmpQ.view(-1, reward_size)
             # print(torch.bmm(w_ext.unsqueeze(1),
             # 			    tmpQ.data.unsqueeze(2)).view(-1, action_size))
-            act = torch.bmm(Variable(w_ext.unsqueeze(1), requires_grad=False),
-                            tmpQ.unsqueeze(2)).view(-1, action_size).max(1)[1]
+            act = (
+                torch.bmm(
+                    Variable(w_ext.unsqueeze(1), requires_grad=False), tmpQ.unsqueeze(2)
+                )
+                .view(-1, action_size)
+                .max(1)[1]
+            )
 
-            HQ = DQ.gather(1, act.view(-1, 1, 1).expand(DQ.size(0), 1, DQ.size(2))).squeeze()
+            HQ = DQ.gather(
+                1, act.view(-1, 1, 1).expand(DQ.size(0), 1, DQ.size(2))
+            ).squeeze()
 
             nontmlmask = self.nontmlinds(terminal_batch)
             with torch.no_grad():
-                Tau_Q = Variable(torch.zeros(self.batch_size * self.weight_num,
-                                             reward_size).type(FloatTensor))
+                Tau_Q = Variable(
+                    torch.zeros(self.batch_size * self.weight_num, reward_size).type(
+                        FloatTensor
+                    )
+                )
                 Tau_Q[nontmlmask] = self.gamma * HQ[nontmlmask]
                 # Tau_Q.volatile = False
                 Tau_Q += Variable(torch.cat(reward_batch, dim=0))
 
             actions = Variable(torch.cat(action_batch, dim=0))
 
-            Q = Q.gather(1, actions.view(-1, 1, 1).expand(Q.size(0), 1, Q.size(2))
-                         ).view(-1, reward_size)
+            Q = Q.gather(
+                1, actions.view(-1, 1, 1).expand(Q.size(0), 1, Q.size(2))
+            ).view(-1, reward_size)
             Tau_Q = Tau_Q.view(-1, reward_size)
 
-            wQ = torch.bmm(Variable(w_batch.unsqueeze(1)),
-                           Q.unsqueeze(2)).squeeze()
+            wQ = torch.bmm(Variable(w_batch.unsqueeze(1)), Q.unsqueeze(2)).squeeze()
 
-            wTQ = torch.bmm(Variable(w_batch.unsqueeze(1)),
-                            Tau_Q.unsqueeze(2)).squeeze()
+            wTQ = torch.bmm(
+                Variable(w_batch.unsqueeze(1)), Tau_Q.unsqueeze(2)
+            ).squeeze()
 
             # loss = F.mse_loss(Q.view(-1), Tau_Q.view(-1))
             loss = self.beta * F.mse_loss(wQ.view(-1), wTQ.view(-1))
-            loss += (1-self.beta) * F.mse_loss(Q.view(-1), Tau_Q.view(-1))
+            loss += (1 - self.beta) * F.mse_loss(Q.view(-1), Tau_Q.view(-1))
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -248,21 +280,23 @@ class MetaAgent(object):
             self.epsilon -= self.epsilon_delta
         if self.homotopy:
             self.beta += self.beta_delta
-            self.beta_delta = (self.beta-self.beta_init)*self.beta_expbase+self.beta_init-self.beta
+            self.beta_delta = (
+                (self.beta - self.beta_init) * self.beta_expbase
+                + self.beta_init
+                - self.beta
+            )
 
     def predict(self, probe):
-        return self.model(Variable(FloatTensor([0, 0]).unsqueeze(0), requires_grad=False),
-                          Variable(probe.unsqueeze(0), requires_grad=False))
+        state_size = self.model_.state_size
+        return self.model(
+            Variable(torch.zeros(state_size).unsqueeze(0), requires_grad=False),
+            Variable(probe.unsqueeze(0), requires_grad=False),
+        )
 
     def save(self, save_path, model_name):
         torch.save(self.model, "{}{}.pkl".format(save_path, model_name))
 
-
-    def find_preference(
-            self,
-            w_batch,
-            target_batch,
-            pref_param):
+    def find_preference(self, w_batch, target_batch, pref_param):
 
         with torch.no_grad():
             w_batch = FloatTensor(w_batch)
@@ -271,7 +305,7 @@ class MetaAgent(object):
         # compute loss
         pref_param = FloatTensor(pref_param)
         pref_param.requires_grad = True
-        sigmas = FloatTensor([0.001]*len(pref_param))
+        sigmas = FloatTensor([0.001] * len(pref_param))
         dist = torch.distributions.normal.Normal(pref_param, sigmas)
         pref_loss = dist.log_prob(w_batch).sum(dim=1) * target_batch
 
@@ -279,7 +313,7 @@ class MetaAgent(object):
         # Total loss
         loss = pref_loss.mean()
         loss.backward()
-        
+
         eta = 1e-3
         pref_param = pref_param + eta * pref_param.grad
         pref_param = simplex_proj(pref_param.detach().cpu().numpy())
@@ -300,5 +334,5 @@ def simplex_proj(x):
         else:
             ind.append(0)
     rho = np.argmax(ind)
-    delta = (1 - (y[:rho+1]).sum())/(rho+1)
+    delta = (1 - (y[: rho + 1]).sum()) / (rho + 1)
     return np.clip(x + delta, 0, 1)

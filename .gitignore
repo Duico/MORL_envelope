@@ -12,3 +12,4 @@ supermario/saved/*
 .ipynb_checkpoints/*
 pydial/.idea/*
 pydial/.ipynb_checkpoints/*
+.vscode

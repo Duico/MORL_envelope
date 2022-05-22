@@ -2,6 +2,8 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 from .deep_sea_treasure import DeepSeaTreasure
 from .fruit_tree import FruitTree
+from .idm_bo_morl.wrappers import *
+from .morl_z_env_adapter import CartPoleV1AngleEnergyRewardWrapper_adapter
 
 
 class MultiObjectiveEnv(object):
@@ -24,6 +26,12 @@ class MultiObjectiveEnv(object):
             self.reward_spec = self.env.reward_spec
         if env_name == "ft7":
             self.env = FruitTree(7)
+            self.state_spec = self.env.state_spec
+            self.action_spec = self.env.action_spec
+            self.reward_spec = self.env.reward_spec
+        if env_name == "cartpole1":
+            self.env = CartPoleV1AngleEnergyRewardWrapper_adapter(CartPoleV1AngleEnergyRewardWrapper(
+                gym.make("CartPole-v1")))
             self.state_spec = self.env.state_spec
             self.action_spec = self.env.action_spec
             self.reward_spec = self.env.reward_spec
